@@ -1,0 +1,17 @@
+# System Files
+.DS_Store
+Thumbs.db
+
+# Docker Data & Volumes
+influxdb_data/
+grafana_data_vol/
+node-red/data/
+backend/influxdb_data/
+backend/node-red/data/
+
+# Logs
+logs.txt
+*.log
+
+# Sensitive Credentials (if any - though example ones are checked in currently)
+# *.env

@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # Service 1 : La Base de Données Temporelle
+  influxdb:
+    image: influxdb:1.8 # Version stable compatible avec le flux actuel
+    container_name: holter_influxdb
+    restart: always
+    ports:
+      - "8086:8086"
+    environment:
+      - INFLUXDB_DB=heart
+    volumes:
+      - ./influxdb_data:/var/lib/influxdb # Persistance des données ECG
+
+  # Service 2 : Le Cerveau (Logique & Dashboard)
+  node-red:
+    build: ./node-red
+    container_name: holter_nodered
+    restart: always
+    user: root # Nécessaire pour l'accès aux GPIO (si utilisé) ou fichiers système
+    ports:
+      - "1880:1880"
+    environment:
+      - TZ=Europe/Paris # Important pour l'horodatage des logs médicaux
+      - FLOWS=flows.json
+    volumes:
+      - ./node-red/data:/data # Persistance des flux et credentials
+      - ./node-red/flows.json:/data/flows.json # Mount the flows file
+      - ./node-red/flows_cred.json:/data/flows_cred.json # Mount the credentials file
+    links:
+      - influxdb
+    depends_on:
+      - influxdb
+
+  # Service 3 : Visualisation (Grafana)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: holter_grafana
+    user: "0" # Fix permission denied on Windows volumes
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data_vol:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    links:
+      - influxdb
+    depends_on:
+      - influxdb
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
+volumes:
+  grafana_data_vol:
