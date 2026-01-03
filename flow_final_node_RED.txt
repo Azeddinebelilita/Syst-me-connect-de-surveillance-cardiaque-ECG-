@@ -1,0 +1,558 @@
+[
+    {
+        "id": "f39f0a9dcb469fdd",
+        "type": "tab",
+        "label": "🫀 ECG Holter Monitor Pro",
+        "disabled": false,
+        "info": ""
+    },
+    {
+        "id": "1066e7f9eefb5367",
+        "type": "mqtt in",
+        "z": "f39f0a9dcb469fdd",
+        "name": "TTN LoRa Input",
+        "topic": "v3/temp-hum-ceri-c133@ttn/devices/temp-hum-sensor-3/up",
+        "qos": "2",
+        "datatype": "json",
+        "broker": "7eafb2400caaf4ed",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 150,
+        "y": 200,
+        "wires": [
+            [
+                "99756c1fbe1d91d7"
+            ]
+        ]
+    },
+    {
+        "id": "99756c1fbe1d91d7",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "🔍 Data Processor - FIXED",
+        "func": "try {\n    if (msg.topic === 'refresh_chart') {\n        const history = flow.get('ecg_history') || [];\n        if (history.length > 0) {\n            const latest = history[history.length - 1];\n            const hr_msg = { topic: 'HR', payload: latest.hr };\n            const hrv_msg = { topic: 'HRV', payload: Math.round(latest.hrv * 1000) };\n            return [null, hr_msg, hrv_msg, null, null];\n        }\n        return null;\n    }\n    \n    const uplink = msg.payload. uplink_message;\n    const decoded = uplink.decoded_payload;\n    const timestamp = new Date(uplink.received_at);\n    \n    let hr = decoded.heart_rate || 0;\n    let ecg = decoded.ecg_value || 0;\n    let hrv = (decoded.hrv_ms || 0) / 1000;\n    \n    if (hr < 30 || hr > 250) {\n        node.warn('❌ HR out of range:   ' + hr);\n        return null;\n    }\n    \n    const record_id = timestamp.toISOString().replace(/[-:  ]/g, '').replace('T', '_').split('. ')[0];\n    \n    let history = flow.get('ecg_history') || [];\n    history.push({ hr:  hr, ecg: ecg, hrv:   hrv, time: timestamp });\n    if (history.length > 50) history.shift();\n    flow.set('ecg_history', history);\n    \n    const avg = (arr, key) => arr.reduce((s, v) => s + v[key], 0) / arr.length;\n    const hr_avg = Math.round(avg(history, 'hr') * 10) / 10;\n    const hrv_avg = Math.round(avg(history, 'hrv') * 1000) / 10;\n    const ecg_avg = Math.round(avg(history, 'ecg'));\n    \n    let status = 'NORMAL';\n    let color = '#10b981';\n    let icon = '✅';\n    let severity = 'normal';\n    let alertRequired = false;\n    \n    if (hr < 40) {\n        status = 'SEVERE BRADYCARDIA';\n        color = '#ef4444';\n        icon = '🚨';\n        severity = 'critical';\n        alertRequired = true;\n    } else if (hr < 60) {\n        status = 'Bradycardia';\n        color = '#3b82f6';\n        icon = '🔵';\n        severity = 'warning';\n        alertRequired = true;\n    } else if (hr <= 100) {\n        status = 'NORMAL';\n        color = '#10b981';\n        icon = '✅';\n        severity = 'normal';\n        alertRequired = false;\n    } else if (hr <= 150) {\n        status = 'Tachycardia';\n        color = '#f59e0b';\n        icon = '⚠️';\n        severity = 'warning';\n        alertRequired = true;\n    } else {\n        status = 'SEVERE TACHYCARDIA';\n        color = '#ef4444';\n        icon = '🔴';\n        severity = 'critical';\n        alertRequired = true;\n    }\n    \n    let hrv_status = 'Normal Variability';\n    let hrv_color = '#10b981';\n    if (hrv_avg < 20) {\n        hrv_status = 'Low (Stress)';\n        hrv_color = '#f59e0b';\n    } else if (hrv_avg > 100) {\n        hrv_status = 'High (Excellent)';\n        hrv_color = '#3b82f6';\n    }\n    \n    function formatTimestamp(date) {\n        const day = String(date.getDate()).padStart(2, '0');\n        const month = String(date. getMonth() + 1).padStart(2, '0');\n        const year = date.getFullYear();\n        const hours = String(date.getHours()).padStart(2, '0');\n        const minutes = String(date.getMinutes()).padStart(2, '0');\n        const seconds = String(date.getSeconds()).padStart(2, '0');\n        return `${day}/${month}/${year} ${hours}:${minutes}:${seconds}`;\n    }\n    \n    const formattedTimestamp = formatTimestamp(timestamp);\n    \n    const main_dashboard = {\n        payload: {\n            record_id: record_id,\n            hr:   hr,\n            hr_avg: hr_avg,\n            ecg: ecg,\n            ecg_avg:  ecg_avg,\n            hrv:   Math.round(hrv * 1000),\n            hrv_avg: hrv_avg,\n            status: status,\n            color: color,\n            icon:  icon,\n            hrv_status: hrv_status,\n            hrv_color: hrv_color,\n            timestamp: formattedTimestamp\n        }\n    };\n    \n    const hr_msg = { topic: 'HR', payload:  hr };\n    const hrv_msg = { topic: 'HRV', payload: Math.round(hrv * 1000) };\n    \n    const influx = {\n        payload: {\n            heart_rate: hr,\n            hrv_ms: Math.round(hrv * 1000),\n            ecg_value: ecg,\n            hour:   timestamp.getHours(),\n            minute:  timestamp.getMinutes(),\n            second: timestamp.getSeconds(),\n            day_of_month: timestamp.getDate(),\n            month: timestamp.getMonth() + 1,\n            year: timestamp.getFullYear()\n        },\n        tags: {\n            record_id: record_id,\n            device_id: uplink.end_device_ids ?   uplink.end_device_ids. device_id : 'sensor-3',\n            status: status. replace(/[^a-zA-Z]/g, '').substring(0, 20),\n            date: timestamp.toISOString().split('T')[0],\n            time: timestamp.toTimeString().split(' ')[0]\n        }\n    };\n    \n    const email_alert = {\n        payload:   {\n            alertRequired: alertRequired,\n            severity: severity,\n            status: status,\n            hr: hr,\n            hrv: Math.round(hrv * 1000),\n            ecg: ecg,\n            record_id: record_id,\n            timestamp: formattedTimestamp,\n            device_id: uplink.end_device_ids ?  uplink.end_device_ids.device_id : 'sensor-3'\n        }\n    };\n    \n    let record_count = flow.get('record_count') || 0;\n    record_count++;\n    flow.set('record_count', record_count);\n    \n    if (record_count % 10 === 0) {\n        node.warn(`✅ ${record_count} records saved | ${record_id}`);\n    }\n    \n    node.status({\n        fill: alertRequired ? \"red\" : \"green\",\n        shape: \"dot\",\n        text: `${record_count} | ${hr} bpm | ${status}`\n    });\n    \n    return [main_dashboard, hr_msg, hrv_msg, influx, email_alert];\n    \n} catch (error) {\n    node.error('❌ Error:   ' + error.message);\n    node.status({\n        fill: \"red\",\n        shape: \"ring\",\n        text: \"Error\"\n    });\n    return null;\n}",
+        "outputs": 5,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 200,
+        "wires": [
+            [
+                "37fd7ab8f7984e6f"
+            ],
+            [
+                "1ab35eebd11b8c0b"
+            ],
+            [
+                "1ab35eebd11b8c0b"
+            ],
+            [
+                "d0666787d2a32aa6"
+            ],
+            [
+                "9c9395ade3221091"
+            ]
+        ]
+    },
+    {
+        "id": "9c9395ade3221091",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "🚨 Alert Filter - STATE CHANGE ONLY",
+        "func": "if (!  msg.payload.alertRequired) {\n    const lastStatus = flow.get('last_alert_status') || 'NORMAL';\n    if (lastStatus !== 'NORMAL') {\n        flow.set('last_alert_status', 'NORMAL');\n        node.warn(`✅ Retour à la normale`);\n    }\n    return null;\n}\n\nconst currentStatus = msg.payload.status;\nconst lastStatus = flow.get('last_alert_status') || 'NORMAL';\n\nif (currentStatus === lastStatus) {\n    node.warn(`⏭️ Même état (${currentStatus}), pas d'email`);\n    return null;\n}\n\nflow.set('last_alert_status', currentStatus);\n\nconst severity = msg.payload.severity;\nconst status = msg.payload.status;\nconst hr = msg.payload.hr;\n\nlet subject = '';\nlet priority = 'normal';\nif (severity === 'critical') {\n    subject = `🚨 CRITICAL: ${status} Detected!  `;\n    priority = 'high';\n} else if (severity === 'warning') {\n    subject = `⚠️ WARNING: ${status} Detected`;\n    priority = 'normal';\n}\n\nmsg.topic = subject;\nmsg.priority = priority;\n\nlet alertHistory = flow.get('alert_history') || [];\nalertHistory. push({\n    status: status,\n    severity: severity,\n    hr:   hr,\n    timestamp:  msg.payload.timestamp,\n    icon: msg.payload.status. includes('BRADYCARDIA') ? '🔵' : (msg.payload.status.includes('TACHYCARDIA') ? '🔴' : '⚠️')\n});\nif (alertHistory.length > 20) alertHistory.shift();\nflow.set('alert_history', alertHistory);\n\nnode.warn(`📧 CHANGEMENT D'ÉTAT: ${lastStatus} → ${currentStatus} - Email envoyé!  `);\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 770,
+        "y": 350,
+        "wires": [
+            [
+                "5c3147b6aa7b96db"
+            ]
+        ]
+    },
+    {
+        "id": "5c3147b6aa7b96db",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "📧 Format Email",
+        "func": "const data = msg.payload;\nlet severityColor = '#f59e0b';\nlet severityEmoji = '⚠️';\nif (data.severity === 'critical') { severityColor = '#ef4444'; severityEmoji = '🚨'; } else if (data.severity === 'warning') { severityColor = '#f59e0b'; severityEmoji = '⚠️'; }\nmsg.payload = `<! DOCTYPE html><html><head><style>body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:#f5f5f5;margin:0;padding:20px}. container{max-width:600px;margin:0 auto;background: white;border-radius:12px;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.1)}.header{background:linear-gradient(135deg,${severityColor} 0%,${severityColor}dd 100%);color:white;padding:30px;text-align:center}. header h1{margin:0;font-size:28px;font-weight:700}.content{padding:30px}. alert-box{background:#fef3c7;border-left:4px solid ${severityColor};padding:20px;margin:20px 0;border-radius: 8px}. alert-box. critical{background:#fee2e2}. metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin:25px 0}.metric{background:#f9fafb;padding:20px;border-radius:10px;text-align:center;border: 2px solid #e5e7eb}.metric-label{font-size:12px;color:#6b7280;text-transform:uppercase;font-weight:600;margin-bottom:8px}.metric-value{font-size:32px;font-weight:800;color:#1f2937}.metric-unit{font-size:14px;color:#9ca3af;font-weight: 600}.info-row{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid #e5e7eb}. info-label{font-weight:600;color:#6b7280}.info-value{color:#1f2937;font-family:monospace}. footer{background:#f9fafb;padding:20px;text-align:center;color:#6b7280;font-size:13px}. status-badge{display:inline-block;padding:8px 16px;background: ${severityColor};color:white;border-radius:20px;font-weight:700;font-size:16px}</style></head><body><div class=\"container\"><div class=\"header\"><h1>${severityEmoji} ECG Alert System</h1><p style=\"margin:10px 0 0 0;opacity:0.9\">Cardiac Monitoring Alert</p></div><div class=\"content\"><div class=\"alert-box ${data.severity}\"><h2 style=\"margin:0 0 10px 0;color: ${severityColor}\">${severityEmoji} ${data.status}</h2><p style=\"margin:0;font-size:14px;color:#374151\">An abnormal cardiac rhythm has been detected.  Immediate attention may be required.</p></div><h3 style=\"color:#1f2937;margin:25px 0 15px 0\">📊 Vital Signs</h3><div class=\"metrics\"><div class=\"metric\"><div class=\"metric-label\">💓 Heart Rate</div><div class=\"metric-value\" style=\"color: ${severityColor}\">${data.hr}</div><div class=\"metric-unit\">bpm</div></div><div class=\"metric\"><div class=\"metric-label\">📊 HRV</div><div class=\"metric-value\" style=\"color:#8b5cf6\">${data. hrv}</div><div class=\"metric-unit\">ms</div></div><div class=\"metric\"><div class=\"metric-label\">📈 ECG</div><div class=\"metric-value\" style=\"color:#6366f1\">${data.ecg}</div><div class=\"metric-unit\">ADC</div></div></div><h3 style=\"color:#1f2937;margin:25px 0 15px 0\">ℹ️ Alert Details</h3><div style=\"background:#f9fafb;padding:20px;border-radius:10px\"><div class=\"info-row\"><span class=\"info-label\">Status:</span><span class=\"status-badge\">${data.status}</span></div><div class=\"info-row\"><span class=\"info-label\">Severity:</span><span class=\"info-value\" style=\"color:${severityColor};font-weight:700;text-transform:uppercase\">${data. severity}</span></div><div class=\"info-row\"><span class=\"info-label\">Timestamp:</span><span class=\"info-value\">${data.timestamp}</span></div><div class=\"info-row\"><span class=\"info-label\">Record ID:</span><span class=\"info-value\">${data.record_id}</span></div><div class=\"info-row\" style=\"border-bottom:none\"><span class=\"info-label\">Device ID:</span><span class=\"info-value\">${data.device_id}</span></div></div><div style=\"margin-top:25px;padding:15px;background:#eff6ff;border-radius:10px;border-left:4px solid #3b82f6\"><p style=\"margin:0;font-size:14px;color:#1e40af\"><strong>ℹ️ Note:</strong> This is an automated alert from the ECG Holter monitoring system. Please review the patient's condition and take appropriate action if necessary.</p></div></div><div class=\"footer\"><p style=\"margin:0\">🫀 ECG Holter Monitor Pro • Automated Alert System</p><p style=\"margin:5px 0 0 0\">This email was sent automatically.  Please do not reply.</p></div></div></body></html>`;\nmsg.topic = msg.topic || `🚨 ECG Alert:  ${data.status}`;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 1010,
+        "y": 350,
+        "wires": [
+            [
+                "d6721a38ef7db447"
+            ]
+        ]
+    },
+    {
+        "id": "d6721a38ef7db447",
+        "type": "e-mail",
+        "z": "f39f0a9dcb469fdd",
+        "server": "smtp.gmail.com",
+        "port": "465",
+        "authtype": "BASIC",
+        "saslformat": false,
+        "token": "oauth2Response. access_token",
+        "secure": true,
+        "tls": true,
+        "name": "youssefderr02. ea@gmail.com",
+        "dname": "ECG Alert System",
+        "x": 1230,
+        "y": 350,
+        "wires": []
+    },
+    {
+        "id": "d0666787d2a32aa6",
+        "type": "influxdb out",
+        "z": "f39f0a9dcb469fdd",
+        "influxdb": "ede409468583fad1",
+        "name": "✅ Write to ecg_data",
+        "measurement": "ecg_data",
+        "precision": "ms",
+        "retentionPolicy": "",
+        "database": "heart",
+        "precisionV18FluxV20": "ms",
+        "retentionPolicyV18Flux": "",
+        "org": "",
+        "bucket": "",
+        "x": 750,
+        "y": 300,
+        "wires": []
+    },
+    {
+        "id": "37fd7ab8f7984e6f",
+        "type": "ui_template",
+        "z": "f39f0a9dcb469fdd",
+        "group": "69d1e3ee213fd8c0",
+        "name": "Premium Dashboard",
+        "order": 1,
+        "width": "12",
+        "height": "6",
+        "format": "<style>\n@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');\n. ecg-container{font-family:'Inter',sans-serif;background: linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:20px;border-radius: 20px;margin:10px;}\n.status-section{background: linear-gradient(135deg,rgba(255,255,255,0.98) 0%,rgba(248,250,255,0.98) 100%);padding:25px;border-radius:15px;margin-bottom:20px;border: 2px solid rgba(255,255,255,0.3);backdrop-filter:blur(10px);box-shadow:0 8px 20px rgba(0,0,0,0.15);}\n.status-badge{display:inline-block;padding:14px 32px;border-radius:50px;font-size:22px;font-weight:800;color: white;animation:pulse 2s infinite;box-shadow:0 8px 20px rgba(0,0,0,0.3);text-transform:uppercase;letter-spacing:1px;}\n@keyframes pulse{0%,100%{transform:scale(1);box-shadow:0 8px 20px rgba(0,0,0,0.3);}50%{transform:scale(1.08);box-shadow:0 12px 30px rgba(0,0,0,0.4);}}\n.metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-top:20px}\n.metric-card{background:linear-gradient(135deg,rgba(255,255,255,0.98) 0%,rgba(248,250,255,0.98) 100%);padding:20px;border-radius:12px;transition:all 0.3s;border:2px solid rgba(102,126,234,0.2);backdrop-filter:blur(10px);box-shadow:0 4px 12px rgba(0,0,0,0.1);}\n.metric-card:hover{transform: translateY(-5px);box-shadow:0 10px 25px rgba(102,126,234,0.3);border-color:rgba(102,126,234,0.4);}\n.metric-label{font-size:12px;color:#6b7280;text-transform:uppercase;margin-bottom:8px;font-weight:700;letter-spacing:1px}\n.metric-value{font-size:40px;font-weight:800;line-height:1;color:#1f2937;}\n.metric-unit{font-size:16px;color:#6b7280;margin-left:5px}\n.footer-info{background: linear-gradient(135deg,rgba(255,255,255,0.95) 0%,rgba(248,250,255,0.95) 100%);padding:12px;border-radius:10px;margin-top:15px;text-align:center;font-size:12px;color:#6b7280;border: 1px solid rgba(102,126,234,0.2);font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,0.08);}\n</style>\n<div class=\"ecg-container\">\n<div class=\"status-section\">\n<div style=\"text-align:center;\">\n<span class=\"status-badge\" ng-style=\"{backgroundColor: msg.payload.color}\">{{msg.payload.icon}} {{msg.payload.status}}</span>\n</div>\n</div>\n<div class=\"metrics-grid\">\n<div class=\"metric-card\">\n<div class=\"metric-label\">💓 HEART RATE</div>\n<div class=\"metric-value\" ng-style=\"{color:msg. payload.color}\">{{msg.payload.hr}}<span class=\"metric-unit\">bpm</span></div>\n<div style=\"font-size:11px;color:#6b7280;margin-top:5px\">Avg: {{msg.payload.hr_avg}} bpm</div>\n</div>\n<div class=\"metric-card\">\n<div class=\"metric-label\">📊 HRV</div>\n<div class=\"metric-value\" ng-style=\"{color:msg.payload.hrv_color}\">{{msg.payload.hrv}}<span class=\"metric-unit\">ms</span></div>\n<div style=\"font-size:11px;color:#6b7280;margin-top: 5px\">{{msg.payload.hrv_status}} • Avg: {{msg.payload.hrv_avg}} ms</div>\n</div>\n<div class=\"metric-card\">\n<div class=\"metric-label\">📈 ECG SIGNAL</div>\n<div class=\"metric-value\" style=\"color:#8b5cf6;\">{{msg.payload.ecg}}<span class=\"metric-unit\">ADC</span></div>\n<div style=\"font-size:11px;color:#6b7280;margin-top:5px\">Avg: {{msg.payload.ecg_avg}} ADC</div>\n</div>\n</div>\n<div class=\"footer-info\">⏱️ {{msg.payload.timestamp}} • 💾 ecg_data</div>\n</div>",
+        "storeOutMessages": false,
+        "fwdInMessages": true,
+        "resendOnRefresh": false,
+        "templateScope": "local",
+        "className": "",
+        "x": 720,
+        "y": 140,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "1ab35eebd11b8c0b",
+        "type": "ui_chart",
+        "z": "f39f0a9dcb469fdd",
+        "name": "HR + HRV Combined Chart",
+        "group": "69d1e3ee213fd8c0",
+        "order": 2,
+        "width": "12",
+        "height": "8",
+        "label": "💓📊 Heart Rate & HRV Real-Time",
+        "chartType": "line",
+        "legend": "true",
+        "xformat": "HH:mm:ss",
+        "interpolate": "linear",
+        "nodata": "Waiting for data.. .",
+        "dot": false,
+        "ymin": "",
+        "ymax": "",
+        "removeOlder": "60",
+        "removeOlderPoints": "1000",
+        "removeOlderUnit": "3600",
+        "cutout": 0,
+        "useOneColor": false,
+        "useUTC": false,
+        "colors": [
+            "#ef4444",
+            "#8b5cf6"
+        ],
+        "outputs": 1,
+        "useDifferentColor": false,
+        "className": "",
+        "x": 760,
+        "y": 220,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "fc6a35918ca8cdac",
+        "type": "ui_template",
+        "z": "f39f0a9dcb469fdd",
+        "group": "69d1e3ee213fd8c0",
+        "name": "🚨 Alert History",
+        "order": 3,
+        "width": "12",
+        "height": "5",
+        "format": "<style>\n.alert-history{font-family:'Inter',sans-serif;background:linear-gradient(135deg,rgba(255,255,255,0.98) 0%,rgba(248,250,255,0.98) 100%);padding:20px;border-radius:15px;margin: 10px;border:2px solid rgba(102,126,234,0.2);box-shadow:0 4px 15px rgba(0,0,0,0.1);max-height:280px;overflow-y:auto;}\n.alert-title{font-size:18px;font-weight:800;color:#1f2937;margin: 0 0 15px 0;text-align:center;text-transform:uppercase;letter-spacing:1px;}\n.alert-list{display:flex;flex-direction:column;gap:10px;}\n.alert-item{background:#f8f9fa;padding:12px 16px;border-radius:10px;display:flex;justify-content:space-between;align-items:center;border-left:4px solid;transition:all 0.2s;}\n.alert-item:hover{transform:translateX(4px);box-shadow:0 4px 12px rgba(0,0,0,0.1);}\n.alert-item.critical{border-left-color:#ef4444;background: linear-gradient(90deg,rgba(239,68,68,0.1) 0%,#f8f9fa 100%);}\n.alert-item.warning{border-left-color:#f59e0b;background:linear-gradient(90deg,rgba(245,158,11,0.1) 0%,#f8f9fa 100%);}\n.alert-info{flex: 1;}\n.alert-status{font-size:14px;font-weight:700;color:#1f2937;margin-bottom: 4px;}\n.alert-time{font-size:11px;color:#6b7280;}\n.alert-hr{font-size:16px;font-weight:700;color:#ef4444;}\n.no-alerts{text-align:center;padding:40px;color:#6b7280;}\n</style>\n<div class=\"alert-history\">\n<h3 class=\"alert-title\">🚨 Historique des Alertes</h3>\n<div class=\"alert-list\" ng-if=\"alerts && alerts.length > 0\">\n<div class=\"alert-item\" ng-repeat=\"alert in alerts track by $index\" ng-class=\"alert.severity\">\n<div class=\"alert-info\">\n<div class=\"alert-status\">{{alert.icon}} {{alert.status}}</div>\n<div class=\"alert-time\">{{alert.timestamp}}</div>\n</div>\n<div class=\"alert-hr\">{{alert.hr}} bpm</div>\n</div>\n</div>\n<div ng-if=\"! alerts || alerts.length === 0\" class=\"no-alerts\">\n<div style=\"font-size:48px;margin-bottom:12px;opacity:0.3\">✅</div>\n<p style=\"margin:0;font-size:14px;font-weight:600;\">Aucune alerte enregistrée</p>\n</div>\n</div>\n<script>\n(function(scope){\nscope.alerts = [];\nscope.$watch('msg', function(msg) {\nif (msg && msg.payload) {\nscope.alerts = msg.payload.reverse();\n}\n});\n})(scope);\n</script>",
+        "storeOutMessages": false,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 720,
+        "y": 400,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "86979660310864fa",
+        "type": "inject",
+        "z": "f39f0a9dcb469fdd",
+        "name": "Refresh Alert History",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "3",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 260,
+        "y": 400,
+        "wires": [
+            [
+                "487e18ae8ac05560"
+            ]
+        ]
+    },
+    {
+        "id": "487e18ae8ac05560",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "Get Alert History",
+        "func": "const alertHistory = flow.get('alert_history') || [];\nmsg.payload = alertHistory;\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 490,
+        "y": 400,
+        "wires": [
+            [
+                "fc6a35918ca8cdac"
+            ]
+        ]
+    },
+    {
+        "id": "282ffb9bab09dbd3",
+        "type": "inject",
+        "z": "f39f0a9dcb469fdd",
+        "name": "Load on Start",
+        "props": [],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "2",
+        "topic": "",
+        "x": 150,
+        "y": 440,
+        "wires": [
+            [
+                "5c682079f1c47682"
+            ]
+        ]
+    },
+    {
+        "id": "5c682079f1c47682",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "📅 Get Available Dates",
+        "func": "msg.query = \"SELECT COUNT(heart_rate) as count FROM ecg_data WHERE time > now() - 365d GROUP BY time(1d)\";\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 360,
+        "y": 470,
+        "wires": [
+            [
+                "9e6d01fd9c0cafa4"
+            ]
+        ]
+    },
+    {
+        "id": "9e6d01fd9c0cafa4",
+        "type": "influxdb in",
+        "z": "f39f0a9dcb469fdd",
+        "influxdb": "ede409468583fad1",
+        "name": "Query Dates",
+        "query": "",
+        "rawOutput": false,
+        "precision": "",
+        "retentionPolicy": "",
+        "org": "",
+        "x": 570,
+        "y": 470,
+        "wires": [
+            [
+                "48edb1113d430b68"
+            ]
+        ]
+    },
+    {
+        "id": "48edb1113d430b68",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "📋 Process Dates",
+        "func": "const raw_data = msg.payload || [];\nif (raw_data. length === 0) { msg.payload = { dates: [], message: 'No data available' }; return msg; }\nconst dates = raw_data.filter(r => r.count > 0).map(r => { let timeVal = r.time; if (typeof timeVal === 'number' && timeVal > 9999999999999) { timeVal = timeVal / 1000000; } const d = new Date(timeVal); return { timestamp: d.getTime(), date_str: d.toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month:  'long', day: 'numeric' }), date_short: d.toLocaleDateString('fr-FR'), count: r.count, iso: d.toISOString().split('T')[0] }; }).reverse();\nmsg.payload = { dates: dates, total: dates.length };\nflow.set('available_dates', msg.payload);\nnode. warn(`✅ Found ${dates.length} days with data`);\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 760,
+        "y": 470,
+        "wires": [
+            [
+                "1e68f8692d96adfe"
+            ]
+        ]
+    },
+    {
+        "id": "1e68f8692d96adfe",
+        "type": "ui_template",
+        "z": "f39f0a9dcb469fdd",
+        "group": "8edabdbfe0840918",
+        "name": "📅 Date Sidebar - FIXED",
+        "order": 1,
+        "width": "3",
+        "height": "27",
+        "format": "<style>\n.date-sidebar{font-family:'Inter',sans-serif;background:linear-gradient(135deg,rgba(255,255,255,0.95) 0%,rgba(240,245,255,0.95) 100%);border-radius:12px;padding:15px;max-height:100%;overflow-y:auto;box-shadow:0 4px 15px rgba(0,0,0,0.1);}\n.date-header{font-size:14px;font-weight:800;color:#1f2937;margin: 0 0 15px 0;text-align: center;text-transform:uppercase;letter-spacing:1px;padding-bottom:10px;border-bottom:2px solid #667eea;}\n.date-list-items{display:flex;flex-direction:column;gap:8px;}\n.date-item{padding:12px;border-radius:10px;background:#f8f9fa;cursor: pointer;transition:all 0.2s;border-left:4px solid transparent;box-shadow:0 2px 5px rgba(0,0,0,0.05);}\n.date-item:hover{background:#e9ecef;transform:translateX(4px);border-left-color:#667eea;box-shadow:0 4px 12px rgba(102,126,234,0.2);}\n.date-item.selected{background: linear-gradient(135deg,#667eea 0%,#764ba2 100%);color: white;border-left-color:#fff;box-shadow:0 6px 15px rgba(102,126,234,0.4);transform:translateX(4px);}\n.date-main{font-size:12px;font-weight:700;margin-bottom:4px;}\n.date-count{font-size:10px;opacity:0.85;}\n.no-data-sidebar{text-align:center;padding:40px 10px;color:#6b7280;}\n.no-data-icon{font-size:48px;margin-bottom:12px;opacity:0.4;}\n</style>\n<div class=\"date-sidebar\">\n<h3 class=\"date-header\">📅 Dates</h3>\n<div ng-if=\"dates && dates.length > 0\">\n<div class=\"date-list-items\">\n<div class=\"date-item\" ng-repeat=\"date in dates\" ng-click=\"selectDate(date. iso)\" ng-class=\"{selected: selectedDate===date.iso}\">\n<div class=\"date-main\">{{date.date_short}}</div>\n<div class=\"date-count\">{{date.count}} lectures</div>\n</div>\n</div>\n</div>\n<div ng-if=\"!dates || dates.length === 0\" class=\"no-data-sidebar\">\n<div class=\"no-data-icon\">📭</div>\n<p style=\"margin:0;font-size: 11px;font-weight:600;\">Aucune donnée</p>\n</div>\n</div>\n<script>\n(function(scope){\nscope.selectedDate = null;\nscope. dates = [];\nscope.$watch('msg', function(msg) {\nif (msg && msg.payload && msg.payload.dates) {\nscope.dates = msg. payload.dates;\n}\n});\nscope.selectDate = function(iso) {\nscope.selectedDate = iso;\nscope.send({payload: iso, topic: 'date_selected'});\n};\n})(scope);\n</script>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 990,
+        "y": 470,
+        "wires": [
+            [
+                "d633c65cc4211a05"
+            ]
+        ]
+    },
+    {
+        "id": "d633c65cc4211a05",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "📋 Build Day Query",
+        "func": "let selected_date;\nif (msg.payload && msg.payload.dates && Array.isArray(msg.payload. dates)) { return null; }\nif (typeof msg.payload === 'string' && msg.payload.match(/^\\d{4}-\\d{2}-\\d{2}$/)) { selected_date = new Date(msg.payload + 'T00:00:00'); } else if (typeof msg.payload === 'number') { selected_date = new Date(msg.payload); } else { node.error('Invalid date format:  ' + JSON.stringify(msg.payload)); return null; }\nif (isNaN(selected_date.getTime())) { node.error('Invalid date value: ' + msg.payload); return null; }\nconst start_of_day = new Date(selected_date);\nstart_of_day.setHours(0, 0, 0, 0);\nconst end_of_day = new Date(selected_date);\nend_of_day.setHours(23, 59, 59, 999);\nconst start_nano = start_of_day.getTime() * 1000000;\nconst end_nano = end_of_day.getTime() * 1000000;\nmsg.query = `SELECT heart_rate, hrv_ms, ecg_value, hour, minute, second FROM ecg_data WHERE time >= ${start_nano} AND time <= ${end_nano} ORDER BY time ASC`;\nmsg.selected_date = selected_date. toLocaleDateString('fr-FR', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });\nmsg.selected_iso = selected_date.toISOString().split('T')[0];\nnode.status({ fill: \"blue\", shape: \"dot\", text: \"Querying:  \" + msg.selected_date });\nnode.warn(`✅ Querying data for ${msg.selected_date}`);\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 190,
+        "y": 590,
+        "wires": [
+            [
+                "11c61e9598f1bd9c"
+            ]
+        ]
+    },
+    {
+        "id": "11c61e9598f1bd9c",
+        "type": "influxdb in",
+        "z": "f39f0a9dcb469fdd",
+        "influxdb": "ede409468583fad1",
+        "name": "Query Day Data",
+        "query": "",
+        "rawOutput": false,
+        "precision": "",
+        "retentionPolicy": "",
+        "org": "",
+        "x": 400,
+        "y": 590,
+        "wires": [
+            [
+                "4d8320d039457697"
+            ]
+        ]
+    },
+    {
+        "id": "4d8320d039457697",
+        "type": "function",
+        "z": "f39f0a9dcb469fdd",
+        "name": "📊 Process Day Data",
+        "func": "const raw_data = msg. payload || [];\nif (raw_data.length === 0) { msg.payload = { selected_date: msg.selected_date, selected_iso: msg.selected_iso, data: [], hr_chart: { labels: [], data: [] }, hrv_chart: { labels:  [], data: [] }, ecg_chart: { labels: [], data:  [] }, summary: { no_data: true } }; return msg; }\nconst hr_values = []; const hrv_values = []; const ecg_values = []; const timestamps = [];\nraw_data.forEach(record => { let timeVal = record.time; if (typeof timeVal === 'number' && timeVal > 9999999999999) { timeVal = timeVal / 1000000; } const time = new Date(timeVal); if (isNaN(time.getTime())) { return; } const hour = record.hour || time.getHours(); const minute = record.minute || time.getMinutes(); const second = record.second || time.getSeconds(); const timeStr = `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`; timestamps.push(timeStr); hr_values.push(record.heart_rate || 0); hrv_values.push(record. hrv_ms || 0); ecg_values.push(record.ecg_value || 0); });\nconst valid_hrs = hr_values.filter(hr => hr > 0); const valid_hrvs = hrv_values.filter(hrv => hrv > 0);\nconst summary = { total:  raw_data.length, avg_hr: valid_hrs.length > 0 ? Math.round(valid_hrs.reduce((a, b) => a + b, 0) / valid_hrs.length) : 0, min_hr: valid_hrs.length > 0 ? Math.min(...valid_hrs) : 0, max_hr: valid_hrs.length > 0 ? Math.max(...valid_hrs) : 0, avg_hrv:  valid_hrvs.length > 0 ? Math.round(valid_hrvs.reduce((a, b) => a + b, 0) / valid_hrvs.length) : 0, no_data: false };\nmsg.payload = { selected_date: msg.selected_date, selected_iso: msg.selected_iso, data: raw_data, hr_chart: { labels: timestamps, data: hr_values }, hrv_chart: { labels: timestamps, data: hrv_values }, ecg_chart: { labels: timestamps, data: ecg_values }, summary:  summary };\nnode.status({ fill: \"green\", shape: \"dot\", text: `${raw_data.length} records` });\nnode.warn(`✅ Processed ${raw_data.length} records for ${msg. selected_date}`);\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 610,
+        "y": 590,
+        "wires": [
+            [
+                "d068fd069bf2bfe3"
+            ]
+        ]
+    },
+    {
+        "id": "d068fd069bf2bfe3",
+        "type": "ui_template",
+        "z": "f39f0a9dcb469fdd",
+        "group": "34af90f60990518e",
+        "name": "📊 History Charts",
+        "order": 1,
+        "width": "9",
+        "height": "27",
+        "format": "<style>\n@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');\n. day{font-family:'Inter',sans-serif;background:linear-gradient(135deg,#667eea 0%,#764ba2 100%);padding:15px;border-radius:15px;min-height:100%}\n.day-header{background: linear-gradient(135deg,rgba(255,255,255,0.95) 0%,rgba(240,245,255,0.95) 100%);padding:20px;border-radius: 12px;margin-bottom:15px;box-shadow:0 4px 15px rgba(0,0,0,0.1);}\n.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:15px}\n.stat{background:linear-gradient(135deg,rgba(255,255,255,0.95) 0%,rgba(240,245,255,0.95) 100%);padding:15px;border-radius:10px;text-align:center;box-shadow:0 3px 10px rgba(0,0,0,0.08);}\n.stat-label{font-size:10px;color:#6b7280;text-transform:uppercase;margin-bottom:5px;font-weight:700;letter-spacing:0.5px;}\n.stat-value{font-size:24px;font-weight:800;color:#1f2937}\n.chart-card{background:linear-gradient(135deg,rgba(255,255,255,0.95) 0%,rgba(240,245,255,0.95) 100%);padding:15px;border-radius:12px;margin-bottom:12px;box-shadow:0 4px 12px rgba(0,0,0,0.08);}\n.chart-title{font-size:16px;font-weight:700;color:#1f2937;margin: 0 0 10px 0}\n</style>\n<div class=\"day\">\n<div ng-if=\"msg.payload.data&&msg.payload.data.length>0\">\n<div class=\"day-header\"><h2 style=\"margin:0;color:#1f2937;font-size:20px;font-weight: 800;\">📊 {{msg.payload.selected_date}}</h2></div>\n<div class=\"stats\">\n<div class=\"stat\" style=\"border-left:3px solid #10b981\"><div class=\"stat-label\">💓 Moy</div><div class=\"stat-value\">{{msg.payload.summary.avg_hr}}<span style=\"font-size:11px\">bpm</span></div></div>\n<div class=\"stat\" style=\"border-left:3px solid #3b82f6\"><div class=\"stat-label\">⬇️ Min</div><div class=\"stat-value\">{{msg.payload. summary.min_hr}}<span style=\"font-size:11px\">bpm</span></div></div>\n<div class=\"stat\" style=\"border-left: 3px solid #ef4444\"><div class=\"stat-label\">⬆️ Max</div><div class=\"stat-value\">{{msg. payload.summary.max_hr}}<span style=\"font-size: 11px\">bpm</span></div></div>\n<div class=\"stat\" style=\"border-left:3px solid #8b5cf6\"><div class=\"stat-label\">📊 VFC</div><div class=\"stat-value\">{{msg.payload. summary.avg_hrv}}<span style=\"font-size:11px\">ms</span></div></div>\n</div>\n<div class=\"chart-card\"><h3 class=\"chart-title\">💓 Fréquence Cardiaque</h3><canvas id=\"hrChart\" style=\"max-height:180px\"></canvas></div>\n<div class=\"chart-card\"><h3 class=\"chart-title\">📊 HRV (Variabilité)</h3><canvas id=\"hrvChart\" style=\"max-height: 180px\"></canvas></div>\n<div class=\"chart-card\"><h3 class=\"chart-title\">📈 Signal ECG</h3><canvas id=\"ecgChart\" style=\"max-height:180px\"></canvas></div>\n</div>\n</div>\n<script src=\"https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js\"></script>\n<script>\n(function(scope){let hrChart=null,hrvChart=null,ecgChart=null;scope.$watch('msg. payload',function(p){if(!p||!p.hr_chart||!p.hr_chart.data||!p.hr_chart. data.length){return}setTimeout(function(){if(hrChart){hrChart.destroy();hrChart=null}if(hrvChart){hrvChart.destroy();hrvChart=null}if(ecgChart){ecgChart.destroy();ecgChart=null}const step=Math.max(1,Math.floor(p.hr_chart.data.length/100));const hrLabels=p.hr_chart. labels.filter((_,i)=>i%step===0);const hrData=p.hr_chart.data.filter((_,i)=>i%step===0);const hrvLabels=p.hrv_chart.labels.filter((_,i)=>i%step===0);const hrvData=p.hrv_chart.data. filter((_,i)=>i%step===0);const ecgLabels=p.ecg_chart.labels.filter((_,i)=>i%step===0);const ecgData=p.ecg_chart.data.filter((_,i)=>i%step===0);const hrMin=Math.max(30,Math.min(...hrData)-10);const hrMax=Math.min(200,Math.max(...hrData)+10);const hrvMin=0;const hrvMax=Math.max(...hrvData)+10;const ecgMin=Math.max(0,Math.min(...ecgData)-20);const ecgMax=Math.max(...ecgData)+20;const commonOptions={responsive:true,maintainAspectRatio:true,aspectRatio:4,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false}},scales:{x:{ticks:{color:'#6b7280',maxRotation:45,minRotation: 0,maxTicksLimit:8,font:{size:9}},grid:{display:false}}}};const hrCanvas=document.getElementById('hrChart');if(hrCanvas){const hrCtx=hrCanvas.getContext('2d');hrChart=new Chart(hrCtx,{type:'line',data:{labels:hrLabels,datasets:[{label:'Heart Rate (bpm)',data:hrData,borderColor:'#ef4444',backgroundColor:'rgba(239,68,68,0.1)',borderWidth:2,tension:0.4,fill:true,pointRadius:0}]},options:Object.assign({},commonOptions,{scales: Object.assign({},commonOptions. scales,{y:{min:hrMin,max:hrMax,ticks:{color:'#6b7280',stepSize:10,font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}}})})})}const hrvCanvas=document.getElementById('hrvChart');if(hrvCanvas){const hrvCtx=hrvCanvas.getContext('2d');hrvChart=new Chart(hrvCtx,{type:'line',data:{labels: hrvLabels,datasets:[{label:'HRV (ms)',data:hrvData,borderColor:'#8b5cf6',backgroundColor:'rgba(139,92,246,0.1)',borderWidth:2,tension:0.4,fill:true,pointRadius:0}]},options:Object.assign({},commonOptions,{scales: Object.assign({},commonOptions. scales,{y:{min:hrvMin,max:hrvMax,ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}}})})})}const ecgCanvas=document.getElementById('ecgChart');if(ecgCanvas){const ecgCtx=ecgCanvas. getContext('2d');ecgChart=new Chart(ecgCtx,{type:'line',data:{labels:ecgLabels,datasets:[{label:'ECG Signal',data:ecgData,borderColor:'#10b981',backgroundColor:'rgba(16,185,129,0.1)',borderWidth:2,tension:0.1,fill:true,pointRadius: 0}]},options:Object. assign({},commonOptions,{scales:Object.assign({},commonOptions.scales,{y:{min:ecgMin,max:ecgMax,ticks:{color:'#6b7280',font:{size:10}},grid:{color:'rgba(0,0,0,0.05)'}}})})})}},200)},true)})(scope)\n</script>",
+        "storeOutMessages": true,
+        "fwdInMessages": true,
+        "resendOnRefresh": true,
+        "templateScope": "local",
+        "className": "",
+        "x": 870,
+        "y": 600,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "8ef6d2dd9a4ebbf3",
+        "type": "inject",
+        "z": "f39f0a9dcb469fdd",
+        "name": "Refresh Charts",
+        "props": [
+            {
+                "p": "topic",
+                "v": "refresh_chart",
+                "vt": "str"
+            },
+            {
+                "p": "payload",
+                "v": "",
+                "vt": "str"
+            }
+        ],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "x": 240,
+        "y": 280,
+        "wires": [
+            [
+                "99756c1fbe1d91d7"
+            ]
+        ]
+    },
+    {
+        "id": "7eafb2400caaf4ed",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "eu1.cloud.thethings.network",
+        "port": "1883",
+        "tls": "",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": 4,
+        "keepalive": 60,
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "v3/temp-hum-ceri-c133@ttn/devices/temp-hum-sensor-3/up",
+        "birthQos": "0",
+        "birthRetain": "false",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closeRetain": "false",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willRetain": "false",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "ede409468583fad1",
+        "type": "influxdb",
+        "hostname": "192.168.137.101",
+        "port": "8086",
+        "protocol": "http",
+        "database": "heart",
+        "name": "InfluxDB_Final",
+        "usetls": false,
+        "influxdbVersion": "1.x",
+        "url": "http://192.168.137.101:8086",
+        "rejectUnauthorized": false
+    },
+    {
+        "id": "69d1e3ee213fd8c0",
+        "type": "ui_group",
+        "name": "⚡ Temps Réel",
+        "tab": "d76e138824393762",
+        "order": 1,
+        "disp": true,
+        "width": "12",
+        "collapse": false
+    },
+    {
+        "id": "8edabdbfe0840918",
+        "type": "ui_group",
+        "name": "📅 Dates",
+        "tab": "d76e138824393762",
+        "order": 2,
+        "disp": false,
+        "width": "3",
+        "collapse": false
+    },
+    {
+        "id": "34af90f60990518e",
+        "type": "ui_group",
+        "name": "📊 Résultats",
+        "tab": "d76e138824393762",
+        "order": 2,
+        "disp": false,
+        "width": "9",
+        "collapse": false
+    },
+    {
+        "id": "d76e138824393762",
+        "type": "ui_tab",
+        "name": "🫀 ECG Holter Monitor",
+        "icon": "favorite",
+        "order": 1,
+        "disabled": false,
+        "hidden": false
+    },
+    {
+        "id": "9c54bf3a34808003",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "node-red-node-email": "5.0.2",
+            "node-red-contrib-influxdb": "0.7.0",
+            "node-red-dashboard": "3.6.6"
+        }
+    }
+]

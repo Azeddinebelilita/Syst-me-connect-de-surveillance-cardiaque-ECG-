@@ -1,0 +1,47 @@
+holter_nodered  | 3 Jan 00:41:24 - [info] 
+holter_nodered  | 
+holter_nodered  | Welcome to Node-RED
+holter_nodered  | ===================
+holter_nodered  | 
+holter_nodered  | 3 Jan 00:41:24 - [info] Node-RED version: v4.1.2
+holter_nodered  | 3 Jan 00:41:24 - [info] Node.js  version: v20.19.6
+holter_nodered  | 3 Jan 00:41:24 - [info] Linux 5.15.167.4-microsoft-standard-WSL2 x64 LE
+holter_nodered  | 3 Jan 00:41:24 - [info] Loading palette nodes
+holter_nodered  | 3 Jan 00:41:24 - [info] Dashboard version 3.6.6 started at /ui
+holter_nodered  | 3 Jan 00:41:25 - [info] Settings file  : /data/settings.js
+holter_nodered  | 3 Jan 00:41:25 - [info] Context store  : 'default' [module=memory]
+holter_nodered  | 3 Jan 00:41:25 - [info] User directory : /data
+holter_nodered  | 3 Jan 00:41:25 - [warn] Projects disabled : editorTheme.projects.enabled=false
+holter_nodered  | 3 Jan 00:41:25 - [info] Flows file     : /data/flows.json
+holter_nodered  | 3 Jan 00:41:25 - [info] Server now running at http://127.0.0.1:1880/
+holter_nodered  | 3 Jan 00:41:25 - [warn] 
+holter_nodered  | 
+holter_nodered  | ---------------------------------------------------------------------
+holter_nodered  | Your flow credentials file is encrypted using a system-generated key.
+holter_nodered  | 
+holter_nodered  | If the system-generated key is lost for any reason, your credentials
+holter_nodered  | file will not be recoverable, you will have to delete it and re-enter
+holter_nodered  | your credentials.
+holter_nodered  | 
+holter_nodered  | You should set your own key using the 'credentialSecret' option in
+holter_nodered  | your settings file. Node-RED will then re-encrypt your credentials
+holter_nodered  | file using your chosen key the next time you deploy a change.
+holter_nodered  | ---------------------------------------------------------------------
+holter_nodered  | 
+holter_nodered  | 3 Jan 00:41:25 - [warn] Encrypted credentials not found
+holter_nodered  | 3 Jan 00:41:25 - [info] Starting flows
+holter_nodered  | 3 Jan 00:41:25 - [error] [e-mail:youssefderr02.ea@gmail.com] No e-mail userid set
+holter_nodered  | 3 Jan 00:41:25 - [error] [e-mail:youssefderr02.ea@gmail.com] No e-mail password set
+holter_nodered  | 3 Jan 00:41:25 - [info] Started flows
+holter_nodered  | 3 Jan 00:41:25 - [info] [mqtt-broker:7eafb2400caaf4ed] Connected to broker: mqtt://eu1.cloud.thethings.network:1883
+holter_nodered  | 3 Jan 00:41:26 - [warn] [function:🚨 Alert Filter - STATE CHANGE ONLY] 📧 CHANGEMENT D'ÉTAT: NORMAL → Tachycardia - Email envoyé!  
+holter_nodered  | 3 Jan 00:41:27 - [error] [e-mail:youssefderr02.ea@gmail.com] Error: Missing credentials for "PLAIN"
+holter_nodered  | 3 Jan 00:41:27 - [warn] [function:📋 Process Dates] ✅ Found 3 days with data
+holter_nodered  | 3 Jan 00:41:36 - [warn] [function:🚨 Alert Filter - STATE CHANGE ONLY] ✅ Retour à la normale
+holter_nodered  | 3 Jan 00:41:55 - [warn] [function:📋 Build Day Query] ✅ Querying data for vendredi 2 janvier 2026
+holter_nodered  | 3 Jan 00:41:55 - [warn] [function:📊 Process Day Data] ✅ Processed 964 records for vendredi 2 janvier 2026
+holter_nodered  | 3 Jan 00:41:57 - [warn] [function:📋 Build Day Query] ✅ Querying data for mardi 23 décembre 2025
+holter_nodered  | 3 Jan 00:41:57 - [warn] [function:📊 Process Day Data] ✅ Processed 1227 records for mardi 23 décembre 2025
+holter_nodered  | 3 Jan 00:41:58 - [warn] [function:📋 Build Day Query] ✅ Querying data for lundi 22 décembre 2025
+holter_nodered  | 3 Jan 00:41:58 - [warn] [function:📊 Process Day Data] ✅ Processed 859 records for lundi 22 décembre 2025
+holter_nodered  | 3 Jan 00:42:56 - [warn] [function:🔍 Data Processor - FIXED] ✅ 10 records saved | 20260102_234257.001Z
