@@ -144,5 +144,5 @@ All services will launch automatically:
 This project is open-source and available under the MIT License.
 
 ## 👥 Contributors
-- **Azeddine Belilita** - Lead Developer
-- **Youssef Derr** - System Architect
+- Azeddine Belilita
+- Youssef Derouiche
